@@ -73,5 +73,139 @@
     }
   </script>
 
+<!-- ========== Chat UI: paste this BEFORE the closing </body> tag ========== -->
+<style>
+  /* Chat UI styling (small & self-contained) */
+  #chat-container {
+    width: 420px;
+    max-width: calc(100% - 40px);
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.08);
+    padding: 12px;
+    margin-top: 18px;
+  }
+  #chat-header { font-weight: 600; margin-bottom: 8px; }
+  #messages {
+    height: 260px;
+    overflow-y: auto;
+    border: 1px solid #eee;
+    border-radius: 8px;
+    padding: 8px;
+    margin-bottom: 8px;
+    background: #fafafa;
+  }
+  .msg { margin: 6px 0; padding: 8px 10px; border-radius: 8px; max-width: 85%; }
+  .msg.user { background: #DCF8C6; align-self: flex-end; margin-left: auto; }
+  .msg.agent { background: #f1f1f1; align-self: flex-start; margin-right: auto; }
+  #chat-input { display: flex; gap:8px; }
+  #chat-input input { flex:1; padding:10px; border-radius:8px; border:1px solid #ddd; font-size:14px; }
+  #chat-input button { padding:10px 14px; border-radius:8px; border:none; cursor:pointer; background:#1976D2; color:white; }
+  #chat-typing { font-style:italic; color:#666; font-size:13px; margin-top:6px; }
+</style>
+
+<div id="chat-container" aria-live="polite">
+  <div id="chat-header">Chat with AI Agent</div>
+  <div id="messages" role="log" aria-atomic="false"></div>
+  <div id="chat-input">
+    <input id="chat-message" placeholder="Type a message and hit Enter or Send" autocomplete="off" />
+    <button id="send-chat">Send</button>
+  </div>
+  <div id="chat-typing" style="display:none">AI Agent is typing…</div>
+</div>
+
+<script>
+  (function(){
+    // ===== CONFIGURE =====
+    // Replace this with your n8n webhook chat URL (copy from the Webhook node in your workflow).
+    const CHAT_WEBHOOK_URL = "https://sardarasfandyar.app.n8n.cloud/webhook-chat/IN"; // <-- change this
+
+    // ===== simple session id (keeps conversation state per browser) =====
+    function makeSessionId(){ return 's_'+Date.now()+'_'+Math.random().toString(36).slice(2,9); }
+    let sessionId = localStorage.getItem('n8n_chat_session');
+    if(!sessionId){ sessionId = makeSessionId(); localStorage.setItem('n8n_chat_session', sessionId); }
+
+    // ===== UI helpers =====
+    const messagesEl = document.getElementById('messages');
+    const inputEl = document.getElementById('chat-message');
+    const sendBtn = document.getElementById('send-chat');
+    const typingEl = document.getElementById('chat-typing');
+
+    // keep a small client-side history to send as context (optional)
+    window.n8n_chat_history = window.n8n_chat_history || [];
+
+    function appendMessage(role, text){
+      const div = document.createElement('div');
+      div.className = 'msg ' + (role==='user' ? 'user' : 'agent');
+      div.textContent = text;
+      messagesEl.appendChild(div);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function setTyping(show){
+      typingEl.style.display = show ? 'block' : 'none';
+    }
+
+    // ===== send a message to n8n and display the reply =====
+    async function sendChat(){
+      const text = inputEl.value.trim();
+      if(!text) return;
+      // show user message immediately
+      appendMessage('user', text);
+      // push to local history
+      window.n8n_chat_history.push({ role: 'user', content: text });
+
+      inputEl.value = '';
+      setTyping(true);
+
+      try {
+        const resp = await fetch(CHAT_WEBHOOK_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId,
+            message: text,
+            history: window.n8n_chat_history  // optional: send conversation context
+          })
+        });
+
+        setTyping(false);
+
+        if(!resp.ok){
+          appendMessage('agent', 'Error from server: ' + resp.status);
+          return;
+        }
+
+        const data = await resp.json();
+
+        // try a few common response shapes that n8n workflows return:
+        const reply =
+          (data && data.reply) ||
+          (data && data.response && data.response.text) ||
+          (Array.isArray(data) && data[0] && data[0].json && (data[0].json.reply || data[0].json.text)) ||
+          JSON.stringify(data);
+
+        // append and save to history
+        appendMessage('agent', reply);
+        window.n8n_chat_history.push({ role: 'assistant', content: reply });
+
+      } catch (err) {
+        setTyping(false);
+        appendMessage('agent', 'Network / fetch error: ' + err.message);
+      }
+    }
+
+    // events
+    sendBtn.addEventListener('click', sendChat);
+    inputEl.addEventListener('keydown', (e)=>{ if(e.key === 'Enter') sendChat(); });
+
+    // quick demo greeting if empty
+    if(window.n8n_chat_history.length===0){
+      appendMessage('agent', 'Hello — ask me anything. (Make sure you set CHAT_WEBHOOK_URL in the script.)');
+    }
+  })();
+</script>
+<!-- ========== end Chat UI ========== -->
+ 
 </body>
 </html>
